@@ -264,3 +264,189 @@ fn main() {
     p.say_name().say_age();
 }
 ```
+
+## 各種マクロ
+
+`format!`, `concat!`
+
+```rust
+let s = format!("{}--{:?}", s, ("D", 5));
+let s = format!("{}--{}", "abc", "def")
+let s = concat!("A", "b2", 3)
+```
+
+標準出力，エラー系
+
+`print!`, `println!`, `eprint!`, `eprintln!`, `write!`, `writeln`, `dbg!`
+
+異常終了
+
+`panic!`
+
+```rust
+fn main() {
+    panic!("it will panic")
+}
+```
+
+プログラム外のリソースにアクセスする系
+
+`file!`, `line!`, `cfg!`, `env!`
+
+アサーション
+
+`assert!`, `debug_assert!`, `assert_eq!`, `assert_ne!`, `debug_assert_eq!`, `debug_assert_ne!`
+
+実装補助用マクロ
+
+`unimplemented!`: 何らかの理由があり実装されていないことを示すマクロ
+
+`todo!`: 今後実装しなければならないことを表現するマクロ
+
+`unreachable!`: 処理が到達しないことを示すマクロ
+
+```rust
+fn f(x: usize) -> &'static str{
+    match x {
+        n if n * n % 3 == 0 => "3n",
+        n if n * n % 3 == 1 => "3n + 1 or 3n + 2",
+        _ => unreachable!(), // コンパイラが上記の条件網羅を把握できない
+    }
+}
+```
+
+## トレイトの導出
+
+いくつかのトレイトは，自作の型に対する標準的な実装を自動的に導出することができる
+
+```rust
+#[derive(Eq, PartialEq)]
+struct A(i32);
+
+fn main() {
+    // 一致比較可能
+    println!("{:?}", A(0)==A(1));
+}
+```
+
+他にも，`Ord`, `PartialOrd`, `Copy`, `Clone`, `Debug`, `Default`などがある．
+
+`PartialEq`は，浮動小数の NaN のように反射律($a=a$)を満たさない場合に必要となる，
+
+`==`などの演算子は，`PartialEq`しか要求しないので問題なく浮動小数でも動作する
+
+一方，`Vec`の sort の場合，`Ord`が要求されるので`Vec<f32>`はソートすることができない
+
+以下のように扱うことができるが，NaN が含まれていると unwrap で panic が生じる
+
+```rust
+fn main() {
+    let mut x = vec![0.1, 0.5, 0.3, 0.4, 0.2];
+    x.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    println!("{:?}", x);
+}
+```
+
+## ゼロコスト抽象化
+
+抽象化を行うと，抽象化されたコードから具体的な動作を導くための処理が必要となり，メモリを多く使用した処理が発生しがちである
+
+ゼロコスト抽象化においては，抽象化されたトレイトやジェネリクスを使用する型に落とし込む作業をコンパイル時に行うことで余計なコストをゼロにしている
+
+### trait
+
+トレイトは，様々な型に共通のメソッドを実装するように促すことができる仕組みである
+
+```rust
+trait Tweet {
+    fn tweet(&self);
+
+    fn tweet_twice(&self) {
+        self.tweet();
+        self.tweet();
+    }
+
+    fn shout(&self) {
+        println!("Uooh!!");
+    }
+}
+```
+
+実装する際は以下のように実装できる
+
+```rust
+struct Dove;
+struct Duck;
+
+impl Tweet for Dove {
+    fn tweet(&self) {
+        println!("coo!");
+    }
+}
+
+impl Tweet for Duck {
+    fn tweet(&self) {
+        println!("Quack!");
+    }
+}
+
+fn main() {
+    let dove = Dove {};
+    dove.tweet();
+    dove.tweet_twice();
+    dove.shout();
+
+    let duck = Duck {};
+
+    let brid_vec: Vec<Box<dyn Tweet>> = vec![Box::new(dove), Box::new(duck)];
+    for bird in bird_vec {
+        bird.tweet();
+    }
+}
+```
+
+一般に，メソッドの呼び出しには動的ディスパッチと静的ディスパッチが存在する．
+
+動的ディスパッチでは，メソッドが呼び出された時，呼び出したインスタンスを確認し，それに合わせた処理を実行時に決める方式．
+
+静的ディスパッチは，コンパイル時に実行する処理を決めてしまう．
+
+Rust では，`dyn`キーワードを使うときのみ，動的ディスパッチを適用するようにしている．
+
+### マーカトレイト
+
+`Copy`, `Sync`などメソッドのない，マーカー的な役割をするトレイトもある．
+
+コンパイラが安全性の検査や最適化をする際に使用する
+
+### 所有権と借用
+
+Rust では，それぞれの値には所有権があり，その所有権を持っているのは必ず一つの変数（所有者）だけであると定められている．
+
+所有者のスコープが外れたら，値は破棄されることでメモリの二重解放といったエラーを回避している．
+
+ただし，この方法だと関数に値を引数で渡すときに所有権が移ってしまうという問題がある．
+
+このような場合に値の参照を貸し出すことができ，これを借用と呼ぶ．
+
+値の参照が借用されている間に，所有者である変数が値を破棄してしまうと参照エラーが生じてしまうので，これを防ぐために「ライフタイム」が明確に定まっている
+
+#### ムーブセマンティクス
+
+Rust では，変数は値に束縛され，その所有権を持つことになる．
+
+変数同士を等号で結ぶと，所有権が譲渡される（ムーブセマンティクス）
+
+```rust
+struct Color {
+    r: i32,
+    g: i32,
+    b: i32,
+}
+
+fn main() {
+    let a = Color{r:255,g:255,b:255};
+    let b = a; // 所有権の譲渡
+    println!("{} {} {}", b.r, b.g, b.b)
+}
+```
